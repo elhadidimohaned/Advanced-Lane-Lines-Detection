@@ -610,4 +610,157 @@ def VisualizeLaneDetection(binary_warped, left_fit,right_fit, left_lane_inds, ri
 l,r,ld,rd,o=SlidingWindowSearch(combinedImage, plot=False)
 VisualizeLaneDetection(combinedImage,l,r,ld,rd,o)
 
+# ### Step 11- Unwarp  
 
+# In[46]:
+
+
+# Unwarp Image and plot line
+
+def DrawLine(original_image,binary_warped, left_fit, right_fit):
+    
+    h,w= binary_warped.shape
+    Minv = cv2.getPerspectiveTransform(dst, src)
+    ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
+    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty +left_fit[2]
+    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2] 
+    warp_zero = np.zeros_like(binary_warped).astype(np.uint8)
+    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+    
+   
+    ploty = np.linspace(0, h-1, num=h)# to cover same y-range as image
+    
+    # Recast the x and y points into usable format for cv2.fillPoly()
+    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+    pts = np.hstack((pts_left, pts_right))
+
+    # Draw the lane onto the warped blank image
+    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+    cv2.polylines(color_warp, np.int32([pts_left]), isClosed=False, color=(255,0,255), thickness=15)
+    cv2.polylines(color_warp, np.int32([pts_right]), isClosed=False, color=(0,255,255), thickness=15)
+
+    # Warp the blank back to original image space using inverse perspective matrix (Minv)
+    newwarp = cv2.warpPerspective(color_warp, Minv, (w, h)) 
+    #axes[index+1].imshow(newwarp)
+    # Combine the result with the original image
+    result = cv2.addWeighted(original_image, 1, newwarp, 0.5, 0)
+    return result
+
+
+# In[47]:
+
+
+# testing it on test image
+
+originalImage= images[0]
+originalImage=cv2.cvtColor(cv2.imread(originalImage), cv2.COLOR_BGR2RGB)
+returnedOutput =  SlidingWindowSearch(combinedImage)
+left_fit=returnedOutput[0]
+right_fit=returnedOutput[1]
+finalImage=DrawLine(originalImage,combinedImage,left_fit,right_fit)
+plt.imshow(finalImage)
+
+
+# ### Step 12- Calculate Radius and Distance
+
+# In[48]:
+
+
+def CalculateRadiusOfCurvature(binary_warped,left_fit,right_fit):
+    ym_per_pix = 30/720 # meters per pixel in y dimension
+    xm_per_pix = 3.7/700 # meters per pixel in x dimension
+    
+    ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
+    leftx = left_fit[0]*ploty**2 + left_fit[1]*ploty +left_fit[2]
+    rightx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+    positionCar= binary_warped.shape[1]/2
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(ploty*ym_per_pix, leftx*xm_per_pix, 2)
+    right_fit_cr = np.polyfit(ploty*ym_per_pix, rightx*xm_per_pix, 2)
+    # Calculate the new radii of curvature
+    
+    y_eval=np.max(ploty)
+    
+    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
+    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+    
+    
+    left_lane_bottom = (left_fit[0]*y_eval)**2 + left_fit[0]*y_eval + left_fit[2]
+    right_lane_bottom = (right_fit[0]*y_eval)**2 + right_fit[0]*y_eval + right_fit[2]
+    
+    actualPosition= (left_lane_bottom+ right_lane_bottom)/2
+    
+    distance= (positionCar - actualPosition)* xm_per_pix
+    
+    # Now our radius of curvature is in meters
+    #print(left_curverad, 'm', right_curverad, 'm')
+    return (left_curverad + right_curverad)/2, distance
+    # Example values: 632.1 m    626.2 m
+
+
+# ### Step 13- Defining Pipeline
+
+# In[49]:
+
+
+from random import randint
+import datetime
+import time
+def pipeline(originalImage):
+    originalImage= cv2.cvtColor(originalImage, cv2.COLOR_BGR2RGB)
+    undistortedImage= undistortImage(originalImage)
+    warpedImage= WarpPerspective(undistortedImage)
+    combinedImage= combineEverything(warpedImage,color_threshold= [100,255],sobel_threshold=[10,150])
+    returnedOutput =  SlidingWindowSearch(combinedImage)
+    left_fit=returnedOutput[0]
+    right_fit=returnedOutput[1]
+    #VisualizeSlidingWindow(combinedImage, left_fit,right_fit, returnedOutput[2], returnedOutput[3],returnedOutput[4])
+    finalImage=DrawLine(originalImage,combinedImage,left_fit,right_fit)
+    #cv2.imwrite('./test/'+str(randint(0, 99999))+'.jpg',originalImage)
+    
+    radius, distance = CalculateRadiusOfCurvature(combinedImage,left_fit,right_fit)
+    cv2.putText(finalImage,"Radius of Curvature is " + str(int(radius))+ "m", (100,100), 2, 1, (255,255,0),2)
+    #print(distance)
+    cv2.putText(finalImage,"Distance from center is {:2f}".format(distance)+ "m", (100,150), 2, 1, (255,255,0),2)
+    ts = time.time()
+    st = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d %H%M%S')
+        
+    cv2.imwrite('./Output_1/'+str(st)+'.jpg',originalImage)
+    
+    cv2.imwrite('./Output_1/'+str(st)+'_o.jpg',finalImage)
+    newCombinedImage= np.dstack((combinedImage*255,combinedImage*255,combinedImage*255))
+    finalImage[100:240,1000:1200, :]= cv2.resize(newCombinedImage, (200,140))
+    return cv2.cvtColor(finalImage, cv2.COLOR_BGR2RGB)
+    
+
+
+# ### Step 14- Running Pipeline on Test Images
+
+# In[50]:
+
+
+#testing on test images
+f, axes= plt.subplots(8,2,figsize=(15,30))
+
+images = glob.glob('test_images/*.jpg') # Reading Images from test_images folder
+
+for index, image in enumerate(images):
+    originalImage= cv2.cvtColor(cv2.imread(image), cv2.COLOR_BGR2RGB)
+    finalImage=pipeline(originalImage)
+    cv2.imwrite('output_images/'+str(index)+'.jpg', cv2.cvtColor(finalImage,cv2.COLOR_BGR2RGB))
+    axes[index,0].imshow(originalImage)
+    axes[index,1].imshow(finalImage)
+
+
+# ### Step 15- Running Pipeline on Video
+
+# In[51]:
+
+
+import moviepy
+from moviepy.editor import VideoFileClip
+video_output1 = 'video_output.mp4'
+video_input1 = VideoFileClip(sys.argv[1])
+processed_video = video_input1.fl_image(pipeline)
+processed_video.write_videofile(video_output1, audio=False)
