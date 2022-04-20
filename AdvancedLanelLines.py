@@ -609,3 +609,5 @@ def VisualizeLaneDetection(binary_warped, left_fit,right_fit, left_lane_inds, ri
 
 l,r,ld,rd,o=SlidingWindowSearch(combinedImage, plot=False)
 VisualizeLaneDetection(combinedImage,l,r,ld,rd,o)
+
+
